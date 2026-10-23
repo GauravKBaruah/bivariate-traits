@@ -1,6 +1,9 @@
 
 library(ggplot2)
 library(tidyverse)
+
+
+
 source("bivariate_plant_pollinator_rcpp.R")
 set.seed(123)
 
@@ -177,7 +180,6 @@ for(r in 1:nrow(fact)){
   fact$biomass[r] <- sum((OUT %>% filter(time == tmax, type == "N"))$v)
   fact$richness[r] <- survivingspecies
   fact$traitlag[r] <- mean(speciestraitlag[index], na.rm=F)
-  #trait-lag
   print(r)
   
 }

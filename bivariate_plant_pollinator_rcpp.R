@@ -1,13 +1,293 @@
-# R interface to the C++ implementation of your attached fixed-covariance model.
-# Keep this file and bivariate_plant_pollinator.cpp in the same directory.
-# R must have Rcpp, statmod and deSolve installed, plus a working C++ compiler.
-# Source this file ONCE before your simulation loop.
+
+
+
 
 .bivariate_source_file <- tryCatch(sys.frame(1)$ofile, error=function(e) NULL)
 .bivariate_source_dir <- if (is.null(.bivariate_source_file)) getwd() else
   dirname(normalizePath(.bivariate_source_file))
 Rcpp::sourceCpp(file.path(.bivariate_source_dir,"bivariate_plant_pollinator.cpp"))
 rm(.bivariate_source_file,.bivariate_source_dir)
+
+
+
+# ------------------------------------------------------------
+# INPUTS
+#
+# muA: A x 2 matrix of pollinator mean traits
+# muP: P x 2 matrix of plant mean traits
+#
+# Column 1 = species optimum
+# Column 2 = morphology
+#
+# Na, Np: pollinator and plant abundances
+#
+# Pa: A x 2 x 2 phenotypic covariance array
+# Pp: P x 2 x 2 phenotypic covariance array
+#
+# IMPORTANT: these are phenotypic covariances:
+# Pa = G_A + E_A
+# Pp = G_P + E_P
+#
+# Rows of every returned network = plants
+# Columns = pollinators
+# -----------------------------------------------------------
+quantitative_network_bivariate <- function(
+    muA, muP, Na, Np,
+    Pa, Pp,
+    thr = 0.05,
+    extinction_threshold = 1e-5,
+    drop_extinct = FALSE
+) {
+  -
+  
+  if (!requireNamespace("bipartite", quietly = TRUE)) {
+    stop("Install the bipartite package first.")
+  }
+  
+  muA <- as.matrix(muA)
+  muP <- as.matrix(muP)
+  
+  A <- length(Na)
+  P <- length(Np)
+  
+  # Check covariance matrices
+  for (i in seq_len(A)) {
+    
+    covariance <- Pa[i, , ]
+    
+    if (max(abs(covariance - t(covariance))) > 1e-10 ||
+        min(eigen(covariance, symmetric = TRUE)$values) <= 0) {
+      stop("Each Pa matrix must be symmetric and positive definite.")
+    }
+  }
+  
+  for (i in seq_len(P)) {
+    
+    covariance <- Pp[i, , ]
+    
+    if (max(abs(covariance - t(covariance))) > 1e-10 ||
+        min(eigen(covariance, symmetric = TRUE)$values) <= 0) {
+      stop("Each Pp matrix must be symmetric and positive definite.")
+    }
+  }
+
+  
+  animal_present <- as.numeric(
+    Na > 0 & Na >= extinction_threshold
+  )
+  
+  plant_present <- as.numeric(
+    Np > 0 & Np >= extinction_threshold
+  )
+  
+  # Entry = 1 only when both species survive
+  presence_matrix <- outer(
+    plant_present,
+    animal_present,
+    FUN = "*"
+  )
+
+  difference_optimum <- outer(
+    muP[, 1],
+    muA[, 1],
+    FUN = "-"
+  )
+  
+  variance_optimum <- outer(
+    Pp[, 1, 1],
+    Pa[, 1, 1],
+    FUN = "+"
+  )
+  
+  distance_optimum <- abs(difference_optimum) /
+    sqrt(variance_optimum)
+  
+  overlap_optimum <- 1 - pmin(distance_optimum, 1)
+  
+  difference_morphology <- outer(
+    muP[, 2],
+    muA[, 2],
+    FUN = "-"
+  )
+  
+  variance_morphology <- outer(
+    Pp[, 2, 2],
+    Pa[, 2, 2],
+    FUN = "+"
+  )
+  
+  distance_morphology <- abs(difference_morphology) /
+    sqrt(variance_morphology)
+  
+  overlap_morphology <- 1 - pmin(distance_morphology, 1)
+  
+  
+  overlap_joint <- matrix(0, nrow = P, ncol = A)
+  
+  for (i in seq_len(P)) {
+    
+    for (k in seq_len(A)) {
+      
+      d1 <- muP[i, 1] - muA[k, 1]
+      d2 <- muP[i, 2] - muA[k, 2]
+      
+      V11 <- Pp[i, 1, 1] + Pa[k, 1, 1]
+      V22 <- Pp[i, 2, 2] + Pa[k, 2, 2]
+      V12 <- Pp[i, 1, 2] + Pa[k, 1, 2]
+      
+      determinant <- V11 * V22 - V12^2
+      
+      distance_squared <- (
+        V22 * d1^2 -
+          2 * V12 * d1 * d2 +
+          V11 * d2^2
+      ) / determinant
+      
+      # Prevent tiny negative values from numerical rounding
+      distance_squared <- max(distance_squared, 0)
+      
+      joint_distance <- sqrt(distance_squared / 2)
+      
+      overlap_joint[i, k] <- 1 - min(joint_distance, 1)
+    }
+  }
+
+  
+  weighted_optimum <- overlap_optimum * presence_matrix
+  weighted_morphology <- overlap_morphology * presence_matrix
+  weighted_joint <- overlap_joint * presence_matrix
+  
+  network_optimum <- 1 * (weighted_optimum > thr)
+  network_morphology <- 1 * (weighted_morphology > thr)
+  network_joint <- 1 * (weighted_joint > thr)
+  
+  rownames(network_optimum) <- paste0("Plant_", seq_len(P))
+  colnames(network_optimum) <- paste0("Animal_", seq_len(A))
+  
+  dimnames(network_morphology) <- dimnames(network_optimum)
+  dimnames(network_joint) <- dimnames(network_optimum)
+  
+  dimnames(weighted_optimum) <- dimnames(network_optimum)
+  dimnames(weighted_morphology) <- dimnames(network_optimum)
+  dimnames(weighted_joint) <- dimnames(network_optimum)
+  
+
+  if (drop_extinct) {
+    
+    keep_plants <- plant_present == 1
+    keep_animals <- animal_present == 1
+    
+    network_optimum <- network_optimum[
+      keep_plants, keep_animals, drop = FALSE
+    ]
+    
+    network_morphology <- network_morphology[
+      keep_plants, keep_animals, drop = FALSE
+    ]
+    
+    network_joint <- network_joint[
+      keep_plants, keep_animals, drop = FALSE
+    ]
+    
+    weighted_optimum <- weighted_optimum[
+      keep_plants, keep_animals, drop = FALSE
+    ]
+    
+    weighted_morphology <- weighted_morphology[
+      keep_plants, keep_animals, drop = FALSE
+    ]
+    
+    weighted_joint <- weighted_joint[
+      keep_plants, keep_animals, drop = FALSE
+    ]
+  }
+  
+  
+  # ------------------------------------------------------------
+  # 7. Calculate metrics for one binary network
+  # ------------------------------------------------------------
+  
+  calculate_metrics <- function(web) {
+    
+    connectance <- if (length(web) > 0) {
+      sum(web) / length(web)
+    } else {
+      NA_real_
+    }
+    
+    NODF <- NA_real_
+    H2 <- NA_real_
+    
+    # NODF and H2 are evaluated on the interacting subnetwork.
+    # Empty rows/columns are removed consistently for these metrics.
+    interacting_web <- web[
+      rowSums(web) > 0,
+      colSums(web) > 0,
+      drop = FALSE
+    ]
+    
+    # Return NA for empty or one-species guild networks
+    if (nrow(interacting_web) >= 2 &&
+        ncol(interacting_web) >= 2) {
+      
+      NODF <- as.numeric(
+        unlist(
+          bipartite::nested(
+            interacting_web,
+            method = "NODF"
+          )
+        )[1]
+      )
+      
+      H2 <- as.numeric(
+        bipartite::H2fun(
+          interacting_web,
+          H2_integer = FALSE
+        )[1]
+      )
+      
+      if (!is.finite(NODF)) NODF <- NA_real_
+      if (!is.finite(H2)) H2 <- NA_real_
+    }
+    
+    data.frame(
+      connectance = connectance,
+      NODF = NODF,
+      H2 = H2
+    )
+  }
+  
+  
+  # ------------------------------------------------------------
+  # 8. Collect results
+  # ------------------------------------------------------------
+  
+  metrics <- rbind(
+    optimum = calculate_metrics(network_optimum),
+    morphology = calculate_metrics(network_morphology),
+    joint = calculate_metrics(network_joint)
+  )
+  
+  return(list(
+    
+    metrics = metrics,
+    
+    connectance_optimum = metrics["optimum", "connectance"],
+    connectance_morphology = metrics["morphology", "connectance"],
+    connectance_joint = metrics["joint", "connectance"],
+    
+    NODF_joint = metrics["joint", "NODF"],
+    H2_joint = metrics["joint", "H2"],
+    
+    network_optimum = network_optimum,
+    network_morphology = network_morphology,
+    network_joint = network_joint,
+    
+    overlap_optimum = weighted_optimum,
+    overlap_morphology = weighted_morphology,
+    overlap_joint = weighted_joint
+  ))
+}
 
 # Build one C++ model per simulation, after constructing all your parameters.
 # Its fixed covariance transforms, quadrature offsets and competition inverses
