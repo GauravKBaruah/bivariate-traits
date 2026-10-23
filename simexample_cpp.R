@@ -87,16 +87,17 @@ plot_snapshot(dat = OUT,pars = params,moment = 5000)
 
 
 
-fact<- expand.grid(temperature = c(0,5,10,15,25,30,34), #temperatuer env
-                   rho = seq(-0.9,-0.5,0,0.5,0.9),  #correlation between two traits
+fact<- expand.grid(temperature = c(0,10,20,30,35,40), #temperatuer env
+                   rho = c(-0.9,-0.5,0,0.5,0.9),  #correlation between two traits
                    replicate=1:5)
 
 params <- list()
 
 for(r in 1:nrow(fact)){
   
+  set.seed(r)
   
-  params$matrix <- matrix(c(1,1,0,1,1,1,0,1,0,1,0,0),nrow=4,ncol=3,byrow = T)
+  params$matrix <- matrix(c(1,1,1,1,1,1,1,1,1,1,1,1),nrow=4,ncol=3,byrow = T)
   A <- ncol(params$matrix)
   P <- nrow(params$matrix)
   params$pref_matrix <- matrix(1,nrow=P,ncol=A)
@@ -166,15 +167,23 @@ for(r in 1:nrow(fact)){
  print(plot_snapshot(dat = OUT,pars = params,moment = 5000))
   
   
-  survivingspecies <-  which((OUT %>% filter(time == tmax, type == "N"))$v > 1e-5)
+  survivingspecies <-  length(which((OUT %>% filter(time == tmax, type == "N"))$v > 1e-5))
+  if(survivingspecies == 0){
+  index<-NA
+  }else{ index <-which((OUT %>% filter(time == tmax, type == "N"))$v > 1e-5) }
+  
   speciestraitlag<- (OUT %>% filter(time == tmax, type == "mu1"))$v - fact$temperature[r]
   
   fact$biomass[r] <- sum((OUT %>% filter(time == tmax, type == "N"))$v)
   fact$richness[r] <- survivingspecies
-  fact$traitlag[r] <- mean(speciestraitlag[survivingspecies])
+  fact$traitlag[r] <- mean(speciestraitlag[index], na.rm=F)
   #trait-lag
   print(r)
   
-  
-  
 }
+
+fact %>% ggplot(aes(x= factor(temperature), y =richness ))+
+  geom_point(size= 2, alpha=0.5)+
+  theme_bw()+facet_wrap(.~rho)
+
+
