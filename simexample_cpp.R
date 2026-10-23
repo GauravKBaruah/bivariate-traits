@@ -1,8 +1,8 @@
 
-source("bivariate_plant_pollinator.R")
-
-require(ggplot2)
-require(tidyverse)
+library(ggplot2)
+library(tidyverse)
+source("bivariate_plant_pollinator_rcpp.R")
+set.seed(123)
 
   params <- list()
   params$matrix <- matrix(c(1,1,1,1,1,1),nrow=3,ncol=2)
@@ -67,26 +67,29 @@ require(tidyverse)
   muP2 <- c(1,1.5,2) 
   ic <- c(Na,Np,muA1,muP1,muA2,muP2)
   
-  tmax <- 1000
-  raw <- deSolve::ode(func=eqs_type2_bivariate,y=ic,parms=params,
-                      times=seq(0,tmax,length.out=101),
-                      rtol=1e-9,atol=1e-12)
-  OUT <- organize_results_bivariate(raw,pars=params) 
-  
-  sum((OUT %>% filter(time == tmax, type == "mu"))$v)
 
-  plot_all(OUT)
-  plot_snapshot(dat = OUT,pars = params,moment = 1000)
-  
-  
-  
+# Compile only once when sourcing, then reuse for all runs.
+tmax <- 1000
+raw <- ode_bivariate_cpp(
+  y = ic,
+  parms = params,
+  times = seq(0, tmax, length.out = 101),
+  rtol = 1e-9,
+  atol = 1e-12
+)
+OUT <- organize_results_bivariate(raw, pars = params)
+plot_all(OUT)
+plot_snapshot(dat = OUT,pars = params,moment = 5000)
 
 
 
 #treatment grid- many runs
+
+
+
 fact<- expand.grid(temperature = c(0,5,10,15,25,30,34), #temperatuer env
-                   rho = seq(-0.9,0,0.9),  #correlation between two traits
-                   replicate=1:3)
+                   rho = seq(-0.9,-0.5,0,0.5,0.9),  #correlation between two traits
+                   replicate=1:5)
 
 params <- list()
 
@@ -99,10 +102,10 @@ for(r in 1:nrow(fact)){
   params$pref_matrix <- matrix(1,nrow=P,ncol=A)
   
   #species-specific genetic variances.
-  var1_A <- runif(A, 0.05, 0.15)
+  var1_A <- runif(A, 0.01, 0.1)
   var2_A <- runif(A, 0.002, 0.006)
   
-  var1_P <- runif(P, 0.04,0.12)
+  var1_P <- runif(P, 0.01,0.12)
   var2_P <- runif(P, 0.001, 0.005)
   
   rho <- fact$rho[r]
@@ -125,15 +128,15 @@ for(r in 1:nrow(fact)){
   #G and E must be symmetric positive; G+E must
   
   params$w <- c(1,1.5)          # mutualistic widths for traits 1 and 2
-  params$w_c <- c(0.1,0.15)      # competitive widths for traits 1 and 2
+  params$w_c <- c(0.15,0.15)      # competitive widths for traits 1 and 2
   params$alpha0 <- 1        # interspecific competition amplitude
   params$alpha_ii <- 1      # constant trait-independent self-regulation
-  params$gi <- 1.5
+  params$gi <- 1.25
   params$ki <- 0.25
   params$bw <- 5
   params$a <- 0.1
   params$Temp <- fact$temperature[r]          
-  params$H <- 0.2
+  params$H <- 0.25
   params$mut.strength <- 1
   params$trait_evolve <- 1    # 0 switches off evolution of both means
   params$points <- 6          # 6 per axis = 36 nodes per species gaussian quadrature
@@ -146,8 +149,8 @@ for(r in 1:nrow(fact)){
   params$S <- A+P
   params$evolve_G <- FALSE
   
-  Na <- rep(0.5,A)
-  Np <- rep(0.5,P)
+  Na <- rep(1,A)
+  Np <- rep(1,P)
   muA1 <- runif(A, min= fact$temperature[r] -5 , fact$temperature[r]+5)
   muP1 <- runif(P, min= fact$temperature[r] -5 , fact$temperature[r]+5) #temperature optimum of plants
   muA2 <- runif(A, min= 0.1, 1) # secondary trait--- need to think about trait limits
@@ -155,12 +158,12 @@ for(r in 1:nrow(fact)){
   ic <- c(Na,Np,muA1,muP1,muA2,muP2)
   
   tmax <- 5000
-  raw <- deSolve::ode(func=eqs_type2_bivariate,y=ic,parms=params,
-                      times=seq(0,tmax,length.out=101),
-                      rtol=1e-9,atol=1e-12)
-  OUT <- organize_results_bivariate(raw,pars=params) 
+  raw <- ode_bivariate_cpp(y = ic,parms = params,times = seq(0, tmax, length.out = 101),rtol = 1e-9,atol = 1e-12)
+  OUT <- organize_results_bivariate(raw, pars = params)
+  
+  
   plot_all(OUT)
-  plot_snapshot(dat = OUT,pars = params,moment = 5000)
+ print(plot_snapshot(dat = OUT,pars = params,moment = 5000))
   
   
   survivingspecies <-  which((OUT %>% filter(time == tmax, type == "N"))$v > 1e-5)
@@ -171,7 +174,7 @@ for(r in 1:nrow(fact)){
   fact$traitlag[r] <- mean(speciestraitlag[survivingspecies])
   #trait-lag
   print(r)
-
   
-   
+  
+  
 }
