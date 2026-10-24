@@ -100,7 +100,7 @@ for(r in 1:nrow(fact)){
   
   set.seed(r)
   
-  params$matrix <- matrix(c(1,1,1,1,1,1,1,1,1,1,1,1),nrow=4,ncol=3,byrow = T)
+  params$matrix <- matrix(1, nrow=10,ncol=10)
   A <- ncol(params$matrix)
   P <- nrow(params$matrix)
   params$pref_matrix <- matrix(1,nrow=P,ncol=A)
@@ -168,8 +168,28 @@ for(r in 1:nrow(fact)){
   
   plot_all(OUT)
  print(plot_snapshot(dat = OUT,pars = params,moment = 5000))
-  
-  
+ muA1_final <- (OUT %>% filter(time == tmax, type == "mu1", guild =="A"))$v 
+ muA2_final<-  (OUT %>% filter(time == tmax, type == "mu2", guild =="A"))$v 
+ muP1_final<- (OUT %>% filter(time == tmax, type == "mu1", guild =="P"))$v 
+ muP2_final<-(OUT %>% filter(time == tmax, type == "mu2", guild =="P"))$v 
+ Nafinal<- (OUT %>% filter(time == tmax, type == "N", guild =="A"))$v 
+ Npfinal <-(OUT %>% filter(time == tmax, type == "N", guild =="P"))$v 
+ Pa <- params$G_A + params$E_A
+ Pp <- params$G_P + params$E_P
+ muA <- cbind(muA1_final, muA2_final)
+ muP <- cbind(muP1_final, muP2_final)
+ network_results <- quantitative_network_bivariate(
+   muA = muA,
+   muP = muP,
+   Na = Nafinal,
+   Np = Npfinal,
+   Pa = Pa,
+   Pp = Pp,
+   thr = 0.1,
+   drop_extinct = FALSE
+ )
+ 
+ 
   survivingspecies <-  length(which((OUT %>% filter(time == tmax, type == "N"))$v > 1e-5))
   if(survivingspecies == 0){
   index<-NA
@@ -180,11 +200,15 @@ for(r in 1:nrow(fact)){
   fact$biomass[r] <- sum((OUT %>% filter(time == tmax, type == "N"))$v)
   fact$richness[r] <- survivingspecies
   fact$traitlag[r] <- mean(speciestraitlag[index], na.rm=F)
+  fact$connectance_morp[r] <- network_results$connectance_morphology
+  fact$connectance_optimum[r] <- network_results$connectance_optimum
+  fact$connectance_joint[r] <- network_results$connectance_joint
+  
   print(r)
   
 }
 
-fact %>% ggplot(aes(x= factor(temperature), y =richness ))+
+ fact %>% ggplot(aes(x= factor(temperature), y =biomass ))+
   geom_point(size= 2, alpha=0.5)+
   theme_bw()+facet_wrap(.~rho)
 

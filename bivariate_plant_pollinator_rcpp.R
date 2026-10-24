@@ -38,7 +38,7 @@ quantitative_network_bivariate <- function(
     extinction_threshold = 1e-5,
     drop_extinct = FALSE
 ) {
-  -
+  
   
   if (!requireNamespace("bipartite", quietly = TRUE)) {
     stop("Install the bipartite package first.")
